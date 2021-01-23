@@ -5,8 +5,8 @@
 
 #include "tetromino.h"
 
-const int BOARD_WIDTH = 10;
-const int BOARD_HEIGHT = 40;
+#define BOARD_WIDTH 10
+#define BOARD_HEIGHT 40
 
 // BOARD_VISIBLE is the first visible line of the board. The has an extra 20
 // blocks of headroom above the play area.
@@ -14,23 +14,57 @@ const int BOARD_VISIBLE = 20;
 
 const int BLOCK_SIZE = 32;
 
-const Color COLORS[] = {RAYWHITE, RED,  ORANGE,   YELLOW,
-                        GREEN,    BLUE, DARKBLUE, VIOLET};
+// Settings contains configurable game settings.
+// TODO: load/save from INI
+struct settings {
+    double fast_fall_rate;
+    double das_delay;
+    double das_rate;
 
-const Color GRID_COLOR = {0, 0, 0, 128};
+    Color block_colors[TM_COUNT];
+    Color bg_color;
+    Color grid_color;
+};
+
+struct board {
+    int data[BOARD_HEIGHT][BOARD_WIDTH];
+};
+
+struct game {
+    struct settings settings;
+    struct board board;
+
+    struct tetromino bag[TM_COUNT];
+    struct tetromino next_bag[TM_COUNT];
+    int bag_current;
+
+    struct tetromino falling;
+    int falling_x;
+    int falling_y;
+
+    struct tetromino held;
+    bool has_held;
+    bool used_hold;
+
+    double last_fall;
+    double fall_rate;
+    double move_start;
+    double last_das;
+
+    bool over;
+};
 
 // Collides returns true iff the piece defined by `piece` and `size` cannot be
 // placed on `board` at position `x`, `y` without going out-of-bounds or
 // colliding with an existing square.
-bool collides(int board[BOARD_HEIGHT][BOARD_WIDTH], int x, int y,
-              struct tetromino *piece) {
+bool collides(struct board *board, int x, int y, struct tetromino *piece) {
     for (int i = 0; i < piece->size; i++) {
         for (int j = 0; j < piece->size; j++) {
             if (piece->shape[i][j] == 0)
                 continue;
 
             if (x + i < 0 || x + i >= BOARD_WIDTH || y + j < 0 ||
-                y + j >= BOARD_HEIGHT || board[y + j][x + i] != 0) {
+                y + j >= BOARD_HEIGHT || board->data[y + j][x + i] != 0) {
                 return true;
             }
         }
@@ -41,227 +75,314 @@ bool collides(int board[BOARD_HEIGHT][BOARD_WIDTH], int x, int y,
 
 // Place stamps the piece defined by `piece` and `size` onto `board` at `x`,
 // `y`.
-void place(int board[BOARD_HEIGHT][BOARD_WIDTH], int x, int y,
-           struct tetromino *piece) {
+void place(struct board *board, int x, int y, struct tetromino *piece) {
     for (int i = 0; i < piece->size; i++) {
         for (int j = 0; j < piece->size; j++) {
             if (piece->shape[i][j] == 0)
                 continue;
-            board[y + j][x + i] = piece->shape[i][j];
+            board->data[y + j][x + i] = piece->shape[i][j];
         }
     }
 }
 
 // Clear removes rows [y0, y1) from `board`. All of the cells above the removed
 // rows are shifted down.
-void clear(int board[BOARD_HEIGHT][BOARD_WIDTH], int y0, int y1) {
-    memmove((int *)board + (y1 - y0) * BOARD_WIDTH, board,
+void clear(struct board *board, int y0, int y1) {
+    int *data = (int *)(board->data);
+    memmove(data + (y1 - y0) * BOARD_WIDTH, data,
             y0 * BOARD_WIDTH * sizeof(int));
-    memset((int *)board, 0, (y1 - y0) * BOARD_WIDTH * sizeof(int));
+    memset(data, 0, (y1 - y0) * BOARD_WIDTH * sizeof(int));
 }
 
 // Read_colors reads 7 colors into `colors` from lines of the file at `file`.
 // TODO: replace with INI parser
-void read_colors(Color colors[7], const char *file) {
+void read_colors(Color colors[TM_COUNT], const char *file) {
     char *text = LoadFileText(file);
     char *token = strtok(text, "\n");
 
     int i = 0;
     while (token != NULL) {
-        colors[i] = GetColor((int)strtol(token, NULL, 16));
-        colors[i].a = 255;
+        colors[i] = GetColor(strtoul(token, NULL, 16));
         token = strtok(NULL, "\n");
         i++;
-        if (i >= 7)
+        if (i >= TM_COUNT)
             break;
+    }
+
+    for (; i < TM_COUNT; i++) {
+        colors[i] = RED;
     }
 
     UnloadFileText(text);
 }
 
-void draw_piece(struct tetromino *piece, Color colors[8], int x, int y) {
+void draw_piece_sized(struct tetromino *piece, Color colors[TM_COUNT], int x,
+                      int y, int block_size) {
     for (int i = 0; i < piece->size; i++) {
         for (int j = 0; j < piece->size; j++) {
             if (piece->shape[i][j] == 0)
                 continue;
 
-            DrawRectangle(BLOCK_SIZE * (i + x),
-                          BLOCK_SIZE * (j + y - BOARD_VISIBLE), BLOCK_SIZE,
-                          BLOCK_SIZE, colors[piece->shape[i][j]]);
+            DrawRectangle(block_size * i + x, block_size * j + y, block_size,
+                          block_size, colors[piece->shape[i][j] - 1]);
         }
     }
 }
 
-// Settings contains configurable game settings.
-// TODO: load/save from INI
-struct settings {
-    double fast_fall_rate;
-    double das_delay;
-    double das_rate;
-};
+// Draw_piece draws the given tetromino at (x, y) on-screen.
+void draw_piece(struct tetromino *piece, Color colors[TM_COUNT], int x, int y) {
+    draw_piece_sized(piece, colors, x, y, BLOCK_SIZE);
+}
+
+void draw_board(struct game *game, int x, int y) {
+    for (int j = 0; j < BOARD_VISIBLE; j++) {
+        DrawLine(x, y + j * BLOCK_SIZE, x + BOARD_WIDTH * BLOCK_SIZE, y + j * BLOCK_SIZE,
+                 game->settings.grid_color);
+    }
+
+    for (int j = 0; j < BOARD_WIDTH; j++) {
+        DrawLine(x + j * BLOCK_SIZE, y, x + j * BLOCK_SIZE, y + BOARD_VISIBLE * BLOCK_SIZE,
+                 game->settings.grid_color);
+    }
+
+    for (int j = BOARD_VISIBLE; j < BOARD_HEIGHT; j++) {
+        for (int i = 0; i < BOARD_WIDTH; i++) {
+            if (game->board.data[j][i] == 0)
+                continue;
+
+            DrawRectangle(
+                x + BLOCK_SIZE * i, y + BLOCK_SIZE * (j - BOARD_VISIBLE), BLOCK_SIZE,
+                BLOCK_SIZE,
+                game->settings.block_colors[game->board.data[j][i] - 1]);
+        }
+    }
+}
+
+void draw_bag(struct game *game, int x, int y) {
+    int j = 0;
+    for (int i = game->bag_current + 1; i < TM_COUNT; i++) {
+        draw_piece_sized(game->bag + i, game->settings.block_colors, x,
+                         y + (j++ * TM_MAX_SIZE * (2 + BLOCK_SIZE / 2)),
+                         BLOCK_SIZE / 2);
+    }
+
+    for (int i = 0; i < game->bag_current; i++) {
+        draw_piece_sized(game->next_bag + i, game->settings.block_colors, x,
+                         y + (j++ * TM_MAX_SIZE * (2 + BLOCK_SIZE / 2)),
+                         BLOCK_SIZE / 2);
+    }
+}
+
+void draw_game(struct game *game) {
+    int board_width_px = BLOCK_SIZE * BOARD_WIDTH;
+    int x = (600 - board_width_px)/2;
+    int y = (800 - BLOCK_SIZE * BOARD_VISIBLE)/2;
+
+    draw_board(game, x, y);
+    draw_piece(&game->falling, game->settings.block_colors,
+               x + BLOCK_SIZE * game->falling_x,
+               y + BLOCK_SIZE * (game->falling_y - BOARD_VISIBLE));
+    draw_bag(game, x + board_width_px + 16, y + 16);
+
+    if (game->has_held) {
+        draw_piece_sized(&game->held, game->settings.block_colors,
+                   x - (2 * BLOCK_SIZE) - 16, y + 16, BLOCK_SIZE/2);
+    }
+}
+
+void advance_piece(struct game *game) {
+    game->bag_current++;
+    if (game->bag_current >= TM_COUNT) {
+        game->bag_current = 0;
+        memcpy(game->bag, game->next_bag, TM_COUNT * sizeof(struct tetromino));
+        choose_sequence(game->next_bag);
+    }
+
+    game->falling = game->bag[game->bag_current];
+    game->falling_y = BOARD_VISIBLE;
+    game->falling_x = (BOARD_WIDTH - game->falling.size) / 2;
+
+    if (collides(&game->board, game->falling_x, game->falling_y,
+                 &game->falling)) {
+        game->over = true;
+    }
+}
+
+void swap_held_piece(struct game *game) {
+    if (game->has_held) {
+        struct tetromino temp = game->falling;
+        game->falling = game->held;
+        game->held = temp;
+        game->falling_y = BOARD_VISIBLE;
+        game->falling_x = (BOARD_WIDTH - game->falling.size) / 2;
+        if (collides(&game->board, game->falling_x, game->falling_y,
+                     &game->falling)) {
+            game->over = true;
+        }
+    } else {
+        game->held = game->falling;
+        game->has_held = true;
+        advance_piece(game);
+    }
+}
+
+void game_reset(struct game *game, struct settings settings) {
+    memset(game, 0, sizeof(struct game));
+    game->settings = settings;
+
+    choose_sequence(game->bag);
+    choose_sequence(game->next_bag);
+
+    game->falling = game->bag[game->bag_current];
+    game->falling_y = BOARD_VISIBLE;
+    game->falling_x = (BOARD_WIDTH - game->falling.size) / 2;
+
+    game->last_fall = 0.0;
+    game->fall_rate = 0.5;
+    game->move_start = 0.0;
+    game->last_das = 0.0;
+}
+
+void handle_shift(struct game *game, int key, int x_offset, double time) {
+    if (IsKeyPressed(key)) {
+        game->move_start = time;
+        if (!collides(&game->board, game->falling_x + x_offset, game->falling_y,
+                      &game->falling)) {
+            game->falling_x += x_offset;
+        }
+    } else if (IsKeyDown(key) &&
+               time - game->move_start >= game->settings.das_delay) {
+        if (time - game->last_das >= game->settings.das_rate) {
+            if (!collides(&game->board, game->falling_x + x_offset,
+                          game->falling_y, &game->falling)) {
+                game->falling_x += x_offset;
+            }
+            game->last_das = time;
+        }
+    }
+}
 
 int main(int argc, char const *argv[]) {
     InitWindow(600, 800, "raytris");
     SetTargetFPS(60);
 
-    struct settings settings = {
+    struct settings defaults = {
         .fast_fall_rate = 0.1,
         .das_delay = 0.12,
         .das_rate = 0.01,
+        .bg_color = GetColor(0x000000FF),
+        .grid_color = GetColor(0xFFFFFF22),
     };
 
-    int board[BOARD_HEIGHT][BOARD_WIDTH];
-    memset(board, 0, BOARD_WIDTH * BOARD_HEIGHT * sizeof(int));
+    read_colors(defaults.block_colors, "colors.txt");
 
-    Color colors[8];
-    memcpy(colors, COLORS, 8 * sizeof(Color));
-    read_colors(colors + 1, "colors.txt");
+    struct game game = {0};
+    game_reset(&game, defaults);
 
-    struct tetromino bag[TM_COUNT];
-    int bag_current = 0;
-    choose_sequence(bag);
-
-    struct tetromino falling;
-    struct tetromino rotated;
-    falling = bag[bag_current];
-
-    int piece_y = BOARD_VISIBLE;
-    int piece_x = 0;
-
-    double last_fall = 0.0;
-    double fall_rate = 0.5;
-    double move_start = 0.0;
-    double last_das = 0.0;
-
-    while (!WindowShouldClose()) {
-        double t = GetTime();
-        double actual_fall_rate = fall_rate;
-
-        if (IsKeyDown(KEY_DOWN) && settings.fast_fall_rate < fall_rate) {
-            actual_fall_rate = settings.fast_fall_rate;
-        }
-
-        bool can_place = false;
-
-        if (t - last_fall >= actual_fall_rate) {
-            last_fall = t;
-            if (collides(board, piece_x, piece_y + 1, &falling)) {
-                can_place = true;
-            } else {
-                piece_y += 1;
-            }
-        }
-
-        if (IsKeyPressed(KEY_SPACE)) {
-            while (!collides(board, piece_x, piece_y + 1, &falling)) {
-                piece_y++;
-            }
-
-            can_place = true;
-        }
-
-        if (can_place) {
-            place(board, piece_x, piece_y, &falling);
-
-            bag_current++;
-            if (bag_current >= 7) {
-                bag_current = 0;
-                choose_sequence(bag);
-            }
-
-            falling = bag[bag_current];
+    struct tetromino rotation_buf;
 
             for (int j = piece_y; j < piece_y + 4; j++) {
                 for (int i = 0; i < BOARD_WIDTH; i++) {
                     if (board[j][i] == 0)
-                        goto next_row;
+
+    while (!WindowShouldClose()) {
+        if (!game.over) {
+            double t = GetTime();
+            double actual_fall_rate = game.fall_rate;
+
+            if (IsKeyDown(KEY_DOWN) &&
+                game.settings.fast_fall_rate < game.fall_rate) {
+                actual_fall_rate = game.settings.fast_fall_rate;
+            }
+
+            if (!game.used_hold && IsKeyPressed(KEY_C)) {
+                swap_held_piece(&game);
+                game.used_hold = true;
+            }
+
+            bool can_place = false;
+
+            if (t - game.last_fall >= actual_fall_rate) {
+                game.last_fall = t;
+                if (collides(&game.board, game.falling_x, game.falling_y + 1,
+                             &game.falling)) {
+                    can_place = true;
+                } else {
+                    game.falling_y++;
+                }
+            }
+
+            if (IsKeyPressed(KEY_SPACE)) {
+                while (!collides(&game.board, game.falling_x,
+                                 game.falling_y + 1, &game.falling)) {
+                    game.falling_y++;
                 }
 
-                clear(board, j, j + 1);
-            next_row:;
+                can_place = true;
             }
 
-            piece_y = BOARD_VISIBLE;
-            piece_x = 0;
-        }
+            if (can_place) {
+                place(&game.board, game.falling_x, game.falling_y,
+                      &game.falling);
 
-        if (IsKeyPressed(KEY_RIGHT)) {
-            move_start = t;
-            if (!collides(board, piece_x + 1, piece_y, &falling)) {
-                piece_x += 1;
-            }
-        } else if (IsKeyDown(KEY_RIGHT) &&
-                   t - move_start >= settings.das_delay) {
-            if (t - last_das >= settings.das_rate) {
-                if (!collides(board, piece_x + 1, piece_y, &falling)) {
-                    piece_x += 1;
+                for (int j = game.falling_y; j < game.falling_y + TM_MAX_SIZE;
+                     j++) {
+                    if (j < 0)
+                        continue;
+                    if (j >= BOARD_HEIGHT)
+                        break;
+
+                    for (int i = 0; i < BOARD_WIDTH; i++) {
+                        if (game.board.data[j][i] == 0)
+                            goto next_row;
+                    }
+
+                    clear(&game.board, j, j + 1);
+                next_row:;
                 }
-                last_das = t;
-            }
-        }
 
-        if (IsKeyPressed(KEY_LEFT)) {
-            move_start = t;
-            if (!collides(board, piece_x - 1, piece_y, &falling)) {
-                piece_x -= 1;
+                advance_piece(&game);
+                game.used_hold = false;
             }
-        } else if (IsKeyDown(KEY_LEFT) &&
-                   t - move_start >= settings.das_delay) {
-            if (t - last_das >= settings.das_rate) {
-                if (!collides(board, piece_x - 1, piece_y, &falling)) {
-                    piece_x -= 1;
+
+            handle_shift(&game, KEY_RIGHT, +1, t);
+            handle_shift(&game, KEY_LEFT, -1, t);
+
+            bool cw = IsKeyPressed(KEY_X);
+            bool ccw = IsKeyPressed(KEY_Z);
+
+            if (cw || ccw) {
+                rotate(&game.falling, &rotation_buf,
+                       cw ? CLOCKWISE : COUNTERCLOCKWISE);
+
+                bool fits = !collides(&game.board, game.falling_x,
+                                      game.falling_y, &rotation_buf);
+
+                if (!fits) {
+                    if (!collides(&game.board, game.falling_x - 1,
+                                  game.falling_y, &rotation_buf)) {
+                        game.falling_x -= 1;
+                        fits = true;
+                    } else if (!collides(&game.board, game.falling_x + 1,
+                                         game.falling_y, &rotation_buf)) {
+                        game.falling_x += 1;
+                        fits = true;
+                    }
                 }
-                last_das = t;
+
+                if (fits) {
+                    game.falling = rotation_buf;
+                }
             }
-        }
-
-        bool cw = IsKeyPressed(KEY_X);
-        bool ccw = IsKeyPressed(KEY_Z);
-
-        if (cw || ccw) {
-            rotate(&falling, &rotated, cw ? CLOCKWISE : COUNTERCLOCKWISE);
-
-            bool fits = !collides(board, piece_x, piece_y, &rotated);
-
-            if (!fits && !collides(board, piece_x - 1, piece_y, &rotated)) {
-                piece_x -= 1;
-                fits = true;
-            } else if (!fits &&
-                       !collides(board, piece_x + 1, piece_y, &rotated)) {
-                piece_x += 1;
-                fits = true;
-            }
-
-            if (fits) {
-                falling = rotated;
+        } else {
+            if (IsKeyPressed(KEY_Q)) {
+                game_reset(&game, defaults);
             }
         }
 
         BeginDrawing();
-        ClearBackground(BLACK);
-
-        for (int j = 0; j < BOARD_VISIBLE; j++) {
-            DrawLine(0, j * BLOCK_SIZE, BOARD_WIDTH * BLOCK_SIZE,
-                     j * BLOCK_SIZE, GRID_COLOR);
-        }
-
-        for (int j = 0; j < BOARD_WIDTH; j++) {
-            DrawLine(j * BLOCK_SIZE, 0, j * BLOCK_SIZE,
-                     BOARD_VISIBLE * BLOCK_SIZE, GRID_COLOR);
-        }
-
-        for (int j = BOARD_VISIBLE; j < BOARD_HEIGHT; j++) {
-            for (int i = 0; i < BOARD_WIDTH; i++) {
-                if (board[j][i] == 0)
-                    continue;
-
-                DrawRectangle(BLOCK_SIZE * i, BLOCK_SIZE * (j - BOARD_VISIBLE),
-                              BLOCK_SIZE, BLOCK_SIZE, colors[board[j][i]]);
-            }
-        }
-
-        draw_piece(&falling, colors, piece_x, piece_y);
-
+        ClearBackground(game.settings.bg_color);
+        draw_game(&game);
         EndDrawing();
     }
 

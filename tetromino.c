@@ -50,7 +50,7 @@ void choose_sequence(struct tetromino bag[TM_COUNT]) {
     }
 
     for (int i = 0; i < TM_COUNT; i++) {
-        bag[i] = TETROMINOES[i];
+        bag[i] = TETROMINOES[indices[i]];
     }
 }
 
