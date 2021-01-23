@@ -5,7 +5,7 @@ project(raytris VERSION 0.0.0 LANGUAGES C)
 set(BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 add_subdirectory(raylib)
 
-add_executable(raytris main.c)
+add_executable(raytris main.c tetromino.c)
 target_link_libraries(raytris raylib)
 
 add_custom_command(
