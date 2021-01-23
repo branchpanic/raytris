@@ -9,3 +9,9 @@ install_manifest.txt
 compile_commands.json
 CTestTestfile.cmake
 _deps
+
+build/
+
+# Temporary while working from local symlink
+# TODO: Replace with proper submodule
+raylib/
