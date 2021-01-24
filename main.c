@@ -178,6 +178,7 @@ void draw_game(struct game *game) {
     int x = (600 - board_width_px)/2;
     int y = (800 - BLOCK_SIZE * BOARD_VISIBLE)/2;
 
+    DrawRectangle(x, y, board_width_px, BLOCK_SIZE * BOARD_VISIBLE, GetColor(0x00000055));
     draw_board(game, x, y);
     draw_piece(&game->falling, game->settings.block_colors,
                x + BLOCK_SIZE * game->falling_x,
@@ -280,14 +281,22 @@ int main(int argc, char const *argv[]) {
     game_reset(&game, defaults);
 
     struct tetromino rotation_buf;
+    Shader bg = LoadShader(NULL, "resources/shaders/background/sky.fs");
 
-            for (int j = piece_y; j < piece_y + 4; j++) {
-                for (int i = 0; i < BOARD_WIDTH; i++) {
-                    if (board[j][i] == 0)
+    int u_resolution_loc = GetShaderLocation(bg, "u_resolution");
+    int u_time_loc = GetShaderLocation(bg, "u_time");
+    int u_height_loc = GetShaderLocation(bg, "u_height");
+    int u_over_loc = GetShaderLocation(bg, "u_time_since_over");
+
+    int block_height;
+    double over_time;
+
+    Vector2 resolution = {600, 800};
+    SetShaderValue(bg, u_resolution_loc, &resolution, UNIFORM_VEC2);
 
     while (!WindowShouldClose()) {
+        double t = GetTime();
         if (!game.over) {
-            double t = GetTime();
             double actual_fall_rate = game.fall_rate;
 
             if (IsKeyDown(KEY_DOWN) &&
@@ -324,6 +333,8 @@ int main(int argc, char const *argv[]) {
             if (can_place) {
                 place(&game.board, game.falling_x, game.falling_y,
                       &game.falling);
+                int new_height = BOARD_HEIGHT - game.falling_y;
+                block_height = new_height > block_height ? new_height : block_height;
 
                 for (int j = game.falling_y; j < game.falling_y + TM_MAX_SIZE;
                      j++) {
@@ -338,10 +349,13 @@ int main(int argc, char const *argv[]) {
                     }
 
                     clear(&game.board, j, j + 1);
+                    block_height--;
                 next_row:;
                 }
 
                 advance_piece(&game);
+                if (game.over) over_time = t;
+
                 game.used_hold = false;
             }
 
@@ -377,15 +391,32 @@ int main(int argc, char const *argv[]) {
         } else {
             if (IsKeyPressed(KEY_Q)) {
                 game_reset(&game, defaults);
+                block_height = 0;
+                over_time = 0;
             }
         }
 
+        float t_float = (float)t;
+        SetShaderValue(bg, u_time_loc, &t_float, UNIFORM_FLOAT);
+
+        float height = block_height/(float)BOARD_VISIBLE;
+        SetShaderValue(bg, u_height_loc, &height, UNIFORM_FLOAT);
+
+        float since_over = game.over ? t - over_time : 0.0;
+        SetShaderValue(bg, u_over_loc, &since_over, UNIFORM_FLOAT);
+
         BeginDrawing();
         ClearBackground(game.settings.bg_color);
+
+        BeginShaderMode(bg);
+        DrawRectangle(0, 0, 600, 800, BLACK);
+        EndShaderMode();
+
         draw_game(&game);
         EndDrawing();
     }
 
+    UnloadShader(bg);
     CloseWindow();
     return 0;
 }

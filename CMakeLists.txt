@@ -17,3 +17,10 @@ add_custom_command(
         ${CMAKE_SOURCE_DIR}/colors.txt
         ${CMAKE_CURRENT_BINARY_DIR}/colors.txt
 )
+
+execute_process(
+    COMMAND
+        ${CMAKE_COMMAND} -E create_symlink
+        ${CMAKE_SOURCE_DIR}/resources
+        ${CMAKE_CURRENT_BINARY_DIR}/resources
+)
