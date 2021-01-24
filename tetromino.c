@@ -2,7 +2,7 @@
 
 #include "tetromino.h"
 
-void rotate(struct tetromino *src, struct tetromino *dst, enum direction dir) {
+void tetromino_rotate(tetromino_t *src, tetromino_t *dst, enum direction dir) {
     int size = src->size;
     dst->size = size;
 
