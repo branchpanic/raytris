@@ -10,14 +10,14 @@ void tetromino_rotate(tetromino_t *src, tetromino_t *dst, enum direction dir) {
         for (int j = i; j < size - 1 - i; j++) {
             int temp = src->shape[i][j]; // In case src is dst
 
-            if (dir == CLOCKWISE) {
+            if (dir == COUNTERCLOCKWISE) {
                 dst->shape[i][j] = src->shape[size - 1 - j][i];
                 dst->shape[size - 1 - j][i] =
                     src->shape[size - 1 - i][size - 1 - j];
                 dst->shape[size - 1 - i][size - 1 - j] =
                     src->shape[j][size - 1 - i];
                 dst->shape[j][size - 1 - i] = temp;
-            } else if (dir == COUNTERCLOCKWISE) {
+            } else if (dir == CLOCKWISE) {
                 dst->shape[i][j] = src->shape[j][size - 1 - i];
                 dst->shape[j][size - 1 - i] =
                     src->shape[size - 1 - i][size - 1 - j];

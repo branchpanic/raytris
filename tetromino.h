@@ -13,7 +13,7 @@ typedef struct tetromino {
     int size;
 } tetromino_t;
 
-const tetromino_t TETROMINOES[TM_COUNT];
+extern const tetromino_t TETROMINOES[TM_COUNT];
 
 // Direction represents a rotation direction: either clockwise or
 // counterclockwise.

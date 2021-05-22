@@ -1,0 +1,6 @@
+[submodule ".\\third_party\\inih"]
+	path = .\\third_party\\inih
+	url = https://github.com/benhoyt/inih
+[submodule ".\\third_party\\raylib"]
+	path = .\\third_party\\raylib
+	url = https://github.com/raysan5/raylib.git

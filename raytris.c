@@ -1,7 +1,11 @@
 #include "raytris.h"
 
 #include <raylib.h>
+#include <stdlib.h>
 #include <string.h>
+
+#define max(x, y) (((x) > (y)) ? (x) : (y))
+#define min(x, y) (((x) < (y)) ? (x) : (y))
 
 void board_clear(board_t *board, int y0, int y1) {
     int *data = (int *)(board->data);
@@ -92,9 +96,32 @@ static void handle_shift(struct game *game, int key, int x_offset,
     }
 }
 
-void game_reset(game_t *game, settings_t settings) {
-    memset(game, 0, sizeof(struct game));
-    game->settings = settings;
+void game_init(game_t *game) {
+    game_reset(game);
+    game_reload_shaders(game);
+}
+
+void game_reload_shaders(game_t *game) {
+    game->bg_shader = LoadShader(0, game->settings.bg_shader_name);
+
+#define FIND_LOC(X)                                                            \
+    game->shader_info.X##_loc = GetShaderLocation(game->bg_shader, "u_" #X);
+
+    FIND_LOC(block_size)
+    FIND_LOC(height)
+    FIND_LOC(resolution)
+    FIND_LOC(over_time)
+    FIND_LOC(time)
+
+#undef FIND_LOC
+}
+
+void game_free(game_t *game) {
+    UnloadShader(game->bg_shader);
+}
+
+void game_reset(game_t *game) {
+    memset(&game->board, 0, sizeof(board_t));
 
     choose_sequence(game->bag);
     choose_sequence(game->next_bag);
@@ -103,13 +130,20 @@ void game_reset(game_t *game, settings_t settings) {
     game->falling_y = BOARD_VISIBLE;
     game->falling_x = (BOARD_WIDTH - game->falling.size) / 2;
 
+    game->held = (tetromino_t){0};
+    game->has_held = false;
+    game->used_hold = false;
+
     game->last_fall = 0.0;
     game->fall_rate = 0.5;
     game->move_start = 0.0;
     game->last_das = 0.0;
-}
 
-static tetromino_t rotation_buf;
+    game->over = false;
+
+    game->shader_info.approx_height = 0;
+    game->shader_info.over_time = 0;
+}
 
 bool game_update(game_t *game, double time) {
     if (game->over)
@@ -152,6 +186,8 @@ bool game_update(game_t *game, double time) {
     if (can_place) {
         board_place(&game->board, &game->falling, game->falling_x,
                     game->falling_y);
+        game->shader_info.approx_height = max(BOARD_HEIGHT - game->falling_y,
+                                              game->shader_info.approx_height);
 
         for (int j = game->falling_y; j < game->falling_y + TM_MAX_SIZE; j++) {
             if (j < 0)
@@ -165,6 +201,7 @@ bool game_update(game_t *game, double time) {
             }
 
             board_clear(&game->board, j, j + 1);
+            game->shader_info.approx_height--;
         next_row:;
         }
 
@@ -179,6 +216,7 @@ bool game_update(game_t *game, double time) {
     bool ccw = IsKeyPressed(bindings.key_rotate_ccw);
 
     if (cw || ccw) {
+        tetromino_t rotation_buf;
         tetromino_rotate(&game->falling, &rotation_buf,
                          cw ? CLOCKWISE : COUNTERCLOCKWISE);
 
@@ -201,4 +239,10 @@ bool game_update(game_t *game, double time) {
             game->falling = rotation_buf;
         }
     }
+
+    if (game->over) {
+        game->shader_info.over_time = (float)time;
+    }
+
+    return true;
 }

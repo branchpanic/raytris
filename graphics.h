@@ -19,6 +19,6 @@ void draw_board(board_t *board, palette_t *palette, int x, int y);
 void draw_bag(game_t *game, int x, int y);
 
 // Draw_game draws the entire game to the screen.
-void draw_game(game_t *game);
+void draw_game(game_t *game, double time);
 
 #endif

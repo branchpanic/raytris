@@ -56,6 +56,18 @@ typedef struct game {
     double last_das;
 
     bool over;
+
+    Shader bg_shader;
+    struct shader_info {
+        int time_loc;
+        int over_time_loc;
+        int resolution_loc;
+        int height_loc;
+        int block_size_loc;
+
+        int approx_height;
+        float over_time;
+    } shader_info;
 } game_t;
 
 // Game_advance_piece updates `falling` with the next piece in the queue. If
@@ -68,11 +80,20 @@ void game_advance_piece(game_t *game);
 // used to select the next piece.
 void game_swap_held_piece(game_t *game);
 
-// Game_reset resets a game to its default state with the given settings struct.
-void game_reset(game_t *game, settings_t settings);
+// Game_init sets the state of the given `game` to reasonable defaults. It also
+// loads the background shader if one is specified.
+void game_init(game_t *game);
+
+// Game_reset resets a game to its default state.
+void game_reset(game_t *game);
+
+// Game_reload_shaders reloads game shaders.
+void game_reload_shaders(game_t *game);
 
 // Game_update handles input and updates the current game. It returns false if
 // the game has ended.
 bool game_update(game_t *game, double time);
+
+void game_free(game_t *game);
 
 #endif

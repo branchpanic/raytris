@@ -23,7 +23,6 @@ typedef struct palette {
 } palette_t;
 
 // Settings contains configurable game settings.
-// TODO: load/save from INI
 typedef struct settings {
     double fast_fall_rate;
     double das_delay;
@@ -31,10 +30,12 @@ typedef struct settings {
 
     palette_t palette;
     bindings_t bindings;
+
+    const char* bg_shader_name;
 } settings_t;
 
-const settings_t SETTINGS_DEFAULT;
+extern const settings_t SETTINGS_DEFAULT;
 
-void settings_load_colors(settings_t* s, const char* colors_txt_path);
+int settings_load(settings_t* s, const char* path);
 
 #endif
