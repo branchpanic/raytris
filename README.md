@@ -1,5 +1,7 @@
 # raytris
 
+![A screenshot of raytris](./docs/raytris.png)
+
 That one copyrighted falling block game.
 
 ## Controls
